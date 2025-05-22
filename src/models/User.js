@@ -21,6 +21,14 @@ const UserSchema = new mongoose.Schema(
         'Please provide a valid email'
       ]
     },
+    pendingEmail: {
+      type: String,
+      required: false,
+      match: [
+        /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+        'Please provide a valid email'
+      ]
+    },
     password: {
       type: String,
       required: [true, 'Please provide a password'],

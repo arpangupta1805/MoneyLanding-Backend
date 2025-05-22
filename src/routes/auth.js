@@ -120,6 +120,16 @@ router.post(
         });
       }
 
+      // Check if this is a pending email verification
+      const isEmailChange = !!user.pendingEmail;
+      
+      if (isEmailChange) {
+        // This is an email change verification
+        // Update the primary email with the pending email
+        user.email = user.pendingEmail;
+        user.pendingEmail = undefined; // Clear pending email
+      }
+      
       // Mark email as verified and clear verification fields
       user.isEmailVerified = true;
       user.emailVerificationToken = undefined;
@@ -132,7 +142,7 @@ router.post(
 
       res.json({
         success: true,
-        message: 'Email verified successfully',
+        message: isEmailChange ? 'Email updated and verified successfully' : 'Email verified successfully',
         token,
         user: {
           id: user._id,
@@ -143,7 +153,8 @@ router.post(
           village: user.village,
           address: user.address,
           fatherName: user.fatherName,
-          role: user.role
+          role: user.role,
+          isEmailVerified: user.isEmailVerified
         }
       });
     } catch (error) {
@@ -507,7 +518,8 @@ router.put(
     body('phoneNumber', 'Phone number is required').optional().not().isEmpty(),
     body('village', 'Village name is required').optional().not().isEmpty(),
     body('address').optional(),
-    body('fatherName').optional()
+    body('fatherName').optional(),
+    body('email', 'Please include a valid email').optional().isEmail()
   ],
   async (req, res) => {
     // Check for validation errors
@@ -517,7 +529,18 @@ router.put(
     }
 
     try {
-      const { fullName, phoneNumber, village, address, fatherName } = req.body;
+      const { fullName, phoneNumber, village, address, fatherName, email } = req.body;
+
+      // If email is being updated, check if it's already in use
+      if (email && email !== req.user.email) {
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+          return res.status(400).json({
+            success: false,
+            message: 'Email already in use by another account'
+          });
+        }
+      }
 
       // Build profile update object
       const profileFields = {};
@@ -526,29 +549,74 @@ router.put(
       if (village) profileFields.village = village;
       if (address !== undefined) profileFields.address = address;
       if (fatherName !== undefined) profileFields.fatherName = fatherName;
-
-      // Update user
-      const user = await User.findByIdAndUpdate(
-        req.user.id,
-        { $set: profileFields },
-        { new: true, runValidators: true }
-      );
-
-      res.json({
-        success: true,
-        message: 'Profile updated successfully',
-        user: {
-          id: user._id,
-          username: user.username,
-          email: user.email,
-          fullName: user.fullName,
-          phoneNumber: user.phoneNumber,
-          village: user.village,
-          address: user.address,
-          fatherName: user.fatherName,
-          role: user.role
-        }
-      });
+      
+      // Handle email update separately (if provided)
+      let updatedUser;
+      if (email && email !== req.user.email) {
+        // Get the user and set pendingEmail
+        updatedUser = await User.findById(req.user.id);
+        updatedUser.pendingEmail = email; // Store in pendingEmail, don't change primary email yet
+        
+        // Generate verification token
+        const verificationToken = updatedUser.getEmailVerificationToken();
+        
+        // Apply other profile updates
+        if (fullName) updatedUser.fullName = fullName;
+        if (phoneNumber) updatedUser.phoneNumber = phoneNumber;
+        if (village) updatedUser.village = village;
+        if (address !== undefined) updatedUser.address = address;
+        if (fatherName !== undefined) updatedUser.fatherName = fatherName;
+        
+        await updatedUser.save();
+        
+        // Send verification email to the new/pending email
+        await sendVerificationEmail(email, updatedUser.fullName, verificationToken);
+        
+        return res.json({
+          success: true,
+          message: 'Profile updated. Please verify your new email address.',
+          requiresVerification: true,
+          userId: updatedUser._id,
+          user: {
+            id: updatedUser._id,
+            username: updatedUser.username,
+            email: updatedUser.email, // Return current email
+            pendingEmail: updatedUser.pendingEmail, // Also return pending email
+            fullName: updatedUser.fullName,
+            phoneNumber: updatedUser.phoneNumber,
+            village: updatedUser.village,
+            address: updatedUser.address,
+            fatherName: updatedUser.fatherName,
+            role: updatedUser.role,
+            isEmailVerified: updatedUser.isEmailVerified
+          }
+        });
+      } else {
+        // Regular update without email change
+        updatedUser = await User.findByIdAndUpdate(
+          req.user.id,
+          { $set: profileFields },
+          { new: true, runValidators: true }
+        );
+        
+        return res.json({
+          success: true,
+          message: 'Profile updated successfully',
+          user: {
+            id: updatedUser._id,
+            username: updatedUser.username,
+            email: updatedUser.email,
+            pendingEmail: updatedUser.pendingEmail,
+            fullName: updatedUser.fullName,
+            phoneNumber: updatedUser.phoneNumber,
+            village: updatedUser.village,
+            address: updatedUser.address,
+            fatherName: updatedUser.fatherName,
+            role: updatedUser.role,
+            isEmailVerified: updatedUser.isEmailVerified
+          }
+        });
+      }
     } catch (error) {
       console.error(error);
       res.status(500).json({
