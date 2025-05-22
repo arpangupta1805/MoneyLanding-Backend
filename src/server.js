@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import transactionRoutes from './routes/transactions.js';
+import { createServer } from 'http';
 
 // Load environment variables
 dotenv.config();
@@ -15,31 +16,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const MONGODB_URI = process.env.MONGODB_URI;
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? 
-  process.env.ALLOWED_ORIGINS.split(',') : 
-  ['https://moneylenderapp.com', 'https://www.moneylenderapp.com'];
-
-// Add development origins in non-production environments
-if (NODE_ENV !== 'production') {
-  ALLOWED_ORIGINS.push('http://localhost:5173', 'http://localhost:3000');
-}
 
 // Middleware
 app.use(express.json());
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (ALLOWED_ORIGINS.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    
-    return callback(null, true);
-  },
-  credentials: true
-}));
+app.use(cors())
 
 // Use morgan logger in development mode
 if (NODE_ENV !== 'production') {
@@ -71,13 +51,33 @@ mongoose
   })
   .then(() => {
     console.log('Connected to MongoDB');
-    // Start server after successful database connection
-    app.listen(PORT, () => {
-      console.log(`Server running in ${NODE_ENV} mode on port ${PORT}`);
-    });
+    // Create HTTP server
+    const server = createServer(app);
+    
+    // Start server with port handling
+    startServer(server, PORT);
   })
   .catch((error) => {
     console.error('MongoDB connection error:', error);
   });
+
+// Function to start server and handle port conflicts
+function startServer(server, port) {
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.log(`Port ${port} is already in use, trying ${port + 1}...`);
+      setTimeout(() => {
+        server.close();
+        startServer(server, port + 1);
+      }, 1000);
+    } else {
+      console.error('Server error:', error);
+    }
+  });
+
+  server.listen(port, () => {
+    console.log(`Server running in ${NODE_ENV} mode on port ${port}`);
+  });
+}
 
 export default app; 
