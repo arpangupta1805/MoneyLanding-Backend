@@ -496,4 +496,67 @@ router.post('/validate-password',
   }
 );
 
+// @route   PUT /api/auth/profile
+// @desc    Update user profile
+// @access  Private
+router.put(
+  '/profile',
+  protect,
+  [
+    body('fullName', 'Full name is required').optional().not().isEmpty(),
+    body('phoneNumber', 'Phone number is required').optional().not().isEmpty(),
+    body('village', 'Village name is required').optional().not().isEmpty(),
+    body('address').optional(),
+    body('fatherName').optional()
+  ],
+  async (req, res) => {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+      const { fullName, phoneNumber, village, address, fatherName } = req.body;
+
+      // Build profile update object
+      const profileFields = {};
+      if (fullName) profileFields.fullName = fullName;
+      if (phoneNumber) profileFields.phoneNumber = phoneNumber;
+      if (village) profileFields.village = village;
+      if (address !== undefined) profileFields.address = address;
+      if (fatherName !== undefined) profileFields.fatherName = fatherName;
+
+      // Update user
+      const user = await User.findByIdAndUpdate(
+        req.user.id,
+        { $set: profileFields },
+        { new: true, runValidators: true }
+      );
+
+      res.json({
+        success: true,
+        message: 'Profile updated successfully',
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName,
+          phoneNumber: user.phoneNumber,
+          village: user.village,
+          address: user.address,
+          fatherName: user.fatherName,
+          role: user.role
+        }
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error'
+      });
+    }
+  }
+);
+
 export default router; 
